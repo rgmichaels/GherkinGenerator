@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "Test Authoring Helper (Gherkin)",
+  "version": "0.0.1",
+  "description": "Right-click elements to generate Gherkin + mapping for Playwright-Cucumber.",
+  "permissions": ["contextMenus", "activeTab", "scripting"],
+  "host_permissions": [
+    "https://*.robjmichaels.com/*",
+    "https://robjmichaels.com/*",
+    "https://*.hardmileoutfitters.com/*",
+    "https://hardmileoutfitters.com/*",
+    "https://*.exquisitepets.shop/*",
+    "https://exquisitepets.shop/*",
+    "http://localhost:3000/*",
+    "http://127.0.0.1:3000/*"
+  ],
+  "background": {
+    "service_worker": "sw/service_worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.robjmichaels.com/*",
+        "https://robjmichaels.com/*",
+        "https://*.hardmileoutfitters.com/*",
+        "https://hardmileoutfitters.com/*",
+        "https://*.exquisitepets.shop/*",
+        "https://exquisitepets.shop/*",
+        "http://localhost:3000/*",
+        "http://127.0.0.1:3000/*"
+      ],
+      "js": ["content/content_script.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
