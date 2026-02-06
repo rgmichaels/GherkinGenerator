@@ -3,7 +3,7 @@
   "name": "Test Authoring Helper (Gherkin)",
   "version": "0.0.1",
   "description": "Right-click elements to generate Gherkin + mapping for Playwright-Cucumber.",
-  "permissions": ["contextMenus", "activeTab", "scripting"],
+  "permissions": ["contextMenus", "activeTab", "scripting", "storage"],
   "host_permissions": [
     "https://*.robjmichaels.com/*",
     "https://robjmichaels.com/*",
@@ -12,7 +12,9 @@
     "https://*.exquisitepets.shop/*",
     "https://exquisitepets.shop/*",
     "http://localhost:3000/*",
-    "http://127.0.0.1:3000/*"
+    "http://127.0.0.1:3000/*",
+    "https://rob-michaels.atlassian.net/*",
+    "https://*.atlassian.net/*"
   ],
   "background": {
     "service_worker": "sw/service_worker.js",
@@ -33,5 +35,6 @@
       "js": ["content/content_script.js"],
       "run_at": "document_idle"
     }
-  ]
+  ],
+  "options_page": "options/options.html"
 }

@@ -8,11 +8,13 @@
 5. Select the `dist/` folder at `/Users/robertmichaels/Documents/code/testbrowserextension/dist`.
 6. Navigate to an allowed domain (example: `https://robjmichaels.com`).
 7. Right-click any element on the page and choose **Generate test step… → Assert visible**.
-8. Paste from clipboard into your test file; it contains:
-   - Gherkin line
-   - YAML-ish mapping entry
-   - Generic Cucumber step-def stub
-   - Warnings
+8. The overlay shows a Cucumber editor. Edit the text, use the keyword bar, and click **Copy**.
+
+## Jira Integration
+1. Open the extension settings: `chrome://extensions` → **Details** → **Extension options**.
+2. Enter your Jira base URL, email, and API token.
+3. Add site → project mappings (one per line, e.g. `exquisitepets.shop=KAN`).
+4. In the overlay, select a project and click **Create Jira Ticket**.
 
 ## Allowed Domains
 - `robjmichaels.com`

@@ -1,0 +1,110 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Gherkin Generator Settings</title>
+    <style>
+      :root {
+        color-scheme: light;
+      }
+      body {
+        margin: 0;
+        font-family: system-ui, -apple-system, sans-serif;
+        background: #f6f2ec;
+        color: #1f1f1f;
+      }
+      .wrap {
+        max-width: 900px;
+        margin: 24px auto;
+        padding: 0 16px 40px;
+      }
+      .card {
+        background: #ffffff;
+        border: 1px solid #e0d8cc;
+        border-radius: 12px;
+        padding: 20px;
+        box-shadow: 0 8px 20px rgba(0,0,0,0.06);
+      }
+      h1 {
+        font-size: 22px;
+        margin: 0 0 12px;
+      }
+      label {
+        display: block;
+        font-weight: 600;
+        margin: 14px 0 6px;
+      }
+      input, textarea {
+        width: 100%;
+        padding: 10px 12px;
+        border-radius: 8px;
+        border: 1px solid #e0d8cc;
+        font-size: 14px;
+        font-family: inherit;
+        background: #fff;
+      }
+      textarea {
+        min-height: 120px;
+        resize: vertical;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      }
+      .row {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        margin-top: 16px;
+      }
+      button {
+        padding: 10px 16px;
+        border-radius: 8px;
+        border: 1px solid #1f1f1f;
+        background: #1f1f1f;
+        color: #fff;
+        cursor: pointer;
+      }
+      .secondary {
+        background: #fff;
+        color: #1f1f1f;
+      }
+      .hint {
+        font-size: 12px;
+        color: #4b4b4b;
+        margin-top: 6px;
+      }
+      .status {
+        font-size: 13px;
+        margin-left: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        <h1>Jira Configuration</h1>
+        <div class="hint">Your API token is stored locally in Chrome extension storage.</div>
+
+        <label for="baseUrl">Jira Base URL</label>
+        <input id="baseUrl" placeholder="https://rob-michaels.atlassian.net" />
+
+        <label for="email">Account Email</label>
+        <input id="email" placeholder="rgmichaels@gmail.com" />
+
+        <label for="token">API Token</label>
+        <input id="token" type="password" placeholder="Paste token here" />
+
+        <label for="mapping">Site → Project Mapping</label>
+        <textarea id="mapping" placeholder="exquisitepets.shop=KAN"></textarea>
+        <div class="hint">One mapping per line. Format: domain=PROJECT_KEY</div>
+
+        <div class="row">
+          <button id="save">Save</button>
+          <button id="test" class="secondary">Test Connection</button>
+          <span id="status" class="status"></span>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="./options.js"></script>
+  </body>
+</html>

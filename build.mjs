@@ -17,13 +17,23 @@ const writeManifest = () => {
   fs.writeFileSync(path.join(DIST, "manifest.json"), JSON.stringify(manifest, null, 2));
 };
 
+const copyStatic = () => {
+  const optionsDir = path.join(DIST, "options");
+  ensureDir(optionsDir);
+  fs.copyFileSync(
+    path.join(SRC, "options", "options.html"),
+    path.join(optionsDir, "options.html")
+  );
+};
+
 const build = async () => {
   ensureDir(DIST);
 
   await esbuild.build({
     entryPoints: {
       "sw/service_worker": path.join(SRC, "sw", "service_worker.ts"),
-      "content/content_script": path.join(SRC, "content", "content_script.ts")
+      "content/content_script": path.join(SRC, "content", "content_script.ts"),
+      "options/options": path.join(SRC, "options", "options.ts")
     },
     bundle: true,
     outdir: DIST,
@@ -34,13 +44,15 @@ const build = async () => {
   });
 
   writeManifest();
+  copyStatic();
 };
 
 if (isWatch) {
   const ctx = await esbuild.context({
     entryPoints: {
       "sw/service_worker": path.join(SRC, "sw", "service_worker.ts"),
-      "content/content_script": path.join(SRC, "content", "content_script.ts")
+      "content/content_script": path.join(SRC, "content", "content_script.ts"),
+      "options/options": path.join(SRC, "options", "options.ts")
     },
     bundle: true,
     outdir: DIST,
@@ -52,6 +64,7 @@ if (isWatch) {
 
   await ctx.watch();
   writeManifest();
+  copyStatic();
 } else {
   await build();
 }

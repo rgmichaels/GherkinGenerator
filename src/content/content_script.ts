@@ -53,7 +53,11 @@ async function handleCaptureAndCopy(): Promise<CaptureResult> {
   const capture = buildCapture(target);
   const output = formatClipboard(capture);
   await writeClipboard(output);
-  showOverlay(output);
+  showOverlay(output, {
+    title: capture.title,
+    elementKey: capture.elementKey,
+    url: capture.url,
+  });
   return { ok: true, data: capture };
 }
 
@@ -370,7 +374,10 @@ function cssEscape(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, (match) => `\\${match}`);
 }
 
-function showOverlay(text: string): void {
+function showOverlay(
+  text: string,
+  meta: { title: string; elementKey: string; url: string }
+): void {
   const existing = document.getElementById("test-authoring-helper-overlay");
   if (existing) existing.remove();
 
@@ -466,6 +473,93 @@ function showOverlay(text: string): void {
     keywordBar.appendChild(makeKeywordButton(keyword));
   });
 
+  const jiraPanel = document.createElement("div");
+  jiraPanel.style.marginTop = "12px";
+  jiraPanel.style.padding = "12px";
+  jiraPanel.style.borderRadius = "10px";
+  jiraPanel.style.border = "1px solid #e0d8cc";
+  jiraPanel.style.background = "#ffffff";
+
+  const jiraTitle = document.createElement("div");
+  jiraTitle.textContent = "Create Jira Ticket";
+  jiraTitle.style.fontWeight = "600";
+  jiraTitle.style.marginBottom = "8px";
+  jiraTitle.style.fontFamily = "system-ui, -apple-system, sans-serif";
+
+  const jiraRow = document.createElement("div");
+  jiraRow.style.display = "flex";
+  jiraRow.style.gap = "8px";
+  jiraRow.style.flexWrap = "wrap";
+
+  const projectSelect = document.createElement("select");
+  projectSelect.style.flex = "1 1 200px";
+  projectSelect.style.padding = "8px 10px";
+  projectSelect.style.borderRadius = "8px";
+  projectSelect.style.border = "1px solid #e0d8cc";
+
+  const summaryInput = document.createElement("input");
+  summaryInput.type = "text";
+  summaryInput.style.flex = "2 1 320px";
+  summaryInput.style.padding = "8px 10px";
+  summaryInput.style.borderRadius = "8px";
+  summaryInput.style.border = "1px solid #e0d8cc";
+  summaryInput.value = `UI: ${meta.elementKey} should be visible`;
+
+  const jiraActions = document.createElement("div");
+  jiraActions.style.display = "flex";
+  jiraActions.style.justifyContent = "space-between";
+  jiraActions.style.alignItems = "center";
+  jiraActions.style.marginTop = "10px";
+  jiraActions.style.gap = "8px";
+
+  const jiraStatus = document.createElement("div");
+  jiraStatus.style.fontSize = "12px";
+  jiraStatus.style.color = "#4b4b4b";
+
+  const jiraLink = document.createElement("a");
+  jiraLink.style.fontSize = "12px";
+  jiraLink.style.color = "#1f1f1f";
+  jiraLink.style.marginLeft = "8px";
+  jiraLink.style.textDecoration = "underline";
+  jiraLink.style.display = "none";
+  jiraLink.target = "_blank";
+
+  const jiraButton = document.createElement("button");
+  jiraButton.textContent = "Create Jira Ticket";
+  jiraButton.style.padding = "8px 14px";
+  jiraButton.style.borderRadius = "8px";
+  jiraButton.style.border = "1px solid #1f1f1f";
+  jiraButton.style.background = "#1f1f1f";
+  jiraButton.style.color = "#ffffff";
+  jiraButton.style.cursor = "pointer";
+
+  const optionsButton = document.createElement("button");
+  optionsButton.textContent = "Jira Settings";
+  optionsButton.style.padding = "8px 14px";
+  optionsButton.style.borderRadius = "8px";
+  optionsButton.style.border = "1px solid #1f1f1f";
+  optionsButton.style.background = "#ffffff";
+  optionsButton.style.color = "#1f1f1f";
+  optionsButton.style.cursor = "pointer";
+  optionsButton.addEventListener("click", () => {
+    chrome.runtime.sendMessage({ type: "open-options" });
+  });
+
+  jiraRow.appendChild(projectSelect);
+  jiraRow.appendChild(summaryInput);
+  const jiraStatusWrap = document.createElement("div");
+  jiraStatusWrap.style.display = "flex";
+  jiraStatusWrap.style.alignItems = "center";
+  jiraStatusWrap.appendChild(jiraStatus);
+  jiraStatusWrap.appendChild(jiraLink);
+
+  jiraActions.appendChild(jiraStatusWrap);
+  jiraActions.appendChild(optionsButton);
+  jiraActions.appendChild(jiraButton);
+  jiraPanel.appendChild(jiraTitle);
+  jiraPanel.appendChild(jiraRow);
+  jiraPanel.appendChild(jiraActions);
+
   const footer = document.createElement("div");
   footer.style.display = "flex";
   footer.style.justifyContent = "flex-end";
@@ -518,6 +612,7 @@ function showOverlay(text: string): void {
 
   body.appendChild(keywordBar);
   body.appendChild(textarea);
+  body.appendChild(jiraPanel);
   footer.appendChild(copyButton);
   footer.appendChild(closeButton);
   card.appendChild(header);
@@ -525,6 +620,41 @@ function showOverlay(text: string): void {
   card.appendChild(footer);
   overlay.appendChild(card);
   document.body.appendChild(overlay);
+
+  void loadJiraProjects(projectSelect, jiraStatus).then((defaultKey) => {
+    if (defaultKey) {
+      projectSelect.value = defaultKey;
+    }
+  });
+
+  jiraButton.addEventListener("click", () => {
+    const projectKey = projectSelect.value;
+    const summary = summaryInput.value.trim();
+    const description = `${text}\\n\\nURL: ${meta.url}`;
+
+    jiraStatus.textContent = "Creating ticket...";
+    jiraLink.style.display = "none";
+    chrome.runtime.sendMessage(
+      { type: "jira:create-issue", projectKey, summary, description },
+      async (response) => {
+        if (chrome.runtime.lastError) {
+          jiraStatus.textContent = chrome.runtime.lastError.message;
+          return;
+        }
+        if (!response?.ok) {
+          jiraStatus.textContent = response?.error || "Failed to create issue";
+          return;
+        }
+        jiraStatus.textContent = `Created ${response.key}`;
+        const baseUrl = await getJiraBaseUrl();
+        if (baseUrl) {
+          jiraLink.href = `${baseUrl}/browse/${response.key}`;
+          jiraLink.textContent = "Open";
+          jiraLink.style.display = "inline";
+        }
+      }
+    );
+  });
 }
 
 function insertAtCursor(textarea: HTMLTextAreaElement, insertText: string): void {
@@ -536,4 +666,68 @@ function insertAtCursor(textarea: HTMLTextAreaElement, insertText: string): void
   const cursor = start + insertText.length;
   textarea.selectionStart = cursor;
   textarea.selectionEnd = cursor;
+}
+
+async function loadJiraProjects(
+  select: HTMLSelectElement,
+  status: HTMLElement
+): Promise<string | null> {
+  select.innerHTML = "";
+  const loading = document.createElement("option");
+  loading.textContent = "Loading projects...";
+  loading.value = "";
+  select.appendChild(loading);
+
+  const config = (await chrome.storage.local.get("jiraConfig")) as {
+    jiraConfig?: { mapping?: Record<string, string> };
+  };
+  const mapping = config.jiraConfig?.mapping || {};
+  const hostname = window.location.hostname.toLowerCase();
+  const defaultKey = mapping[hostname] || null;
+
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({ type: "jira:list-projects" }, (response) => {
+      if (chrome.runtime.lastError) {
+        status.textContent = chrome.runtime.lastError.message;
+        select.innerHTML = "";
+        const option = document.createElement("option");
+        option.textContent = "Configure Jira in settings";
+        option.value = "";
+        select.appendChild(option);
+        resolve(defaultKey);
+        return;
+      }
+      if (!response?.ok) {
+        status.textContent = response?.error || "Configure Jira in settings";
+        select.innerHTML = "";
+        const option = document.createElement("option");
+        option.textContent = "Configure Jira in settings";
+        option.value = "";
+        select.appendChild(option);
+        resolve(defaultKey);
+        return;
+      }
+
+      select.innerHTML = "";
+      const projects = response.projects as { key: string; name: string }[];
+      projects.forEach((project) => {
+        const option = document.createElement("option");
+        option.value = project.key;
+        option.textContent = `${project.key} — ${project.name}`;
+        select.appendChild(option);
+      });
+
+      status.textContent = "";
+      resolve(defaultKey);
+    });
+  });
+}
+
+async function getJiraBaseUrl(): Promise<string | null> {
+  const config = (await chrome.storage.local.get("jiraConfig")) as {
+    jiraConfig?: { baseUrl?: string };
+  };
+  const baseUrl = config.jiraConfig?.baseUrl?.trim();
+  if (!baseUrl) return null;
+  return baseUrl.replace(/\/+$/, "");
 }
