@@ -16,6 +16,14 @@
 3. Add site → project mappings (one per line, e.g. `exquisitepets.shop=KAN`).
 4. In the overlay, select a project and click **Create Jira Ticket**.
 
+## AI Scenario Generation (Local)
+1. Install server dependencies (if not done): `npm install`.
+2. Build the extension: `npm run build`.
+3. Set your API key: `export OPENAI_API_KEY="..."`.
+4. Start the local server: `npm run ai:server`.
+5. In extension options, set **AI Server URL** to `http://localhost:8787`.
+6. Use **Generate with AI** in the overlay to create a full Scenario.
+
 ## Allowed Domains
 - `robjmichaels.com`
 - `hardmileoutfitters.com`

@@ -11,7 +11,7 @@ chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({
       id: MENU_ID,
-      title: "Generate test step… → Assert visible",
+      title: "Create JIRA item",
       contexts: ["all"],
     });
   });
@@ -147,6 +147,7 @@ async function handleJiraCreateIssue(
     description?: string;
     stepDef?: string;
     mapping?: string;
+    issueType?: string;
     snapshotDataUrl?: string | null;
     captureRect?: { x: number; y: number; width: number; height: number } | null;
     viewport?: { width: number; height: number };
@@ -184,6 +185,9 @@ async function handleJiraCreateIssue(
     ],
   };
 
+  const issueType =
+    message.issueType?.toLowerCase() === "bug" ? "Bug" : "Story";
+
   const response = await fetch(`${baseUrl}/rest/api/3/issue`, {
     method: "POST",
     headers: {
@@ -196,7 +200,7 @@ async function handleJiraCreateIssue(
         project: { key: message.projectKey },
         summary,
         description,
-        issuetype: { name: "Task" },
+        issuetype: { name: issueType },
       },
     }),
   });
