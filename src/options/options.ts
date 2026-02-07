@@ -5,6 +5,10 @@ type JiraConfig = {
   mapping: Record<string, string>;
 };
 
+type AiConfig = {
+  serverUrl: string;
+};
+
 const baseUrlEl = document.getElementById("baseUrl") as HTMLInputElement;
 const emailEl = document.getElementById("email") as HTMLInputElement;
 const tokenEl = document.getElementById("token") as HTMLInputElement;
@@ -12,6 +16,9 @@ const mappingEl = document.getElementById("mapping") as HTMLTextAreaElement;
 const statusEl = document.getElementById("status") as HTMLSpanElement;
 const saveButton = document.getElementById("save") as HTMLButtonElement;
 const testButton = document.getElementById("test") as HTMLButtonElement;
+const aiServerEl = document.getElementById("aiServer") as HTMLInputElement;
+const aiStatusEl = document.getElementById("aiStatus") as HTMLSpanElement;
+const saveAiButton = document.getElementById("saveAi") as HTMLButtonElement;
 
 const setStatus = (message: string, isError = false) => {
   statusEl.textContent = message;
@@ -40,15 +47,24 @@ const mappingToText = (mapping: Record<string, string>): string => {
 };
 
 const loadConfig = async () => {
-  const stored = (await chrome.storage.local.get("jiraConfig")) as {
+  const stored = (await chrome.storage.local.get([
+    "jiraConfig",
+    "aiConfig",
+  ])) as {
     jiraConfig?: JiraConfig;
+    aiConfig?: AiConfig;
   };
   const config = stored.jiraConfig;
-  if (!config) return;
-  baseUrlEl.value = config.baseUrl || "";
-  emailEl.value = config.email || "";
-  tokenEl.value = config.token || "";
-  mappingEl.value = mappingToText(config.mapping || {});
+  if (config) {
+    baseUrlEl.value = config.baseUrl || "";
+    emailEl.value = config.email || "";
+    tokenEl.value = config.token || "";
+    mappingEl.value = mappingToText(config.mapping || {});
+  }
+  const aiConfig = stored.aiConfig;
+  if (aiConfig) {
+    aiServerEl.value = aiConfig.serverUrl || "";
+  }
 };
 
 const saveConfig = async () => {
@@ -61,9 +77,21 @@ const saveConfig = async () => {
   await chrome.storage.local.set({ jiraConfig: config });
 };
 
+const saveAiConfig = async () => {
+  const config: AiConfig = {
+    serverUrl: aiServerEl.value.trim(),
+  };
+  await chrome.storage.local.set({ aiConfig: config });
+};
+
 saveButton.addEventListener("click", async () => {
   await saveConfig();
   setStatus("Saved");
+});
+
+saveAiButton.addEventListener("click", async () => {
+  await saveAiConfig();
+  aiStatusEl.textContent = "Saved";
 });
 
 testButton.addEventListener("click", async () => {

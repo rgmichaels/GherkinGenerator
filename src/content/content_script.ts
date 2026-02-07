@@ -67,6 +67,9 @@ async function handleCaptureAndCopy(): Promise<CaptureResult> {
     viewport: { width: window.innerWidth, height: window.innerHeight },
     devicePixelRatio: window.devicePixelRatio || 1,
     snapshotUrl,
+    selectedText: capture.selectedText,
+    imageName: capture.imageName,
+    thenLine: buildThenLine(capture),
   });
   return { ok: true, data: capture };
 }
@@ -561,6 +564,9 @@ function showOverlay(
     viewport: { width: number; height: number };
     devicePixelRatio: number;
     snapshotUrl: string | null;
+    selectedText: string | null;
+    imageName: string | null;
+    thenLine: string;
   }
 ): void {
   const existing = document.getElementById("test-authoring-helper-overlay");
@@ -593,6 +599,7 @@ function showOverlay(
   header.style.padding = "12px 16px";
   header.style.fontFamily = "system-ui, -apple-system, sans-serif";
   header.style.fontWeight = "600";
+  header.style.cursor = "move";
   header.textContent = "Copied to clipboard";
 
   const body = document.createElement("div");
@@ -672,6 +679,20 @@ function showOverlay(
   jiraRow.style.gap = "8px";
   jiraRow.style.flexWrap = "wrap";
 
+  const issueTypeSelect = document.createElement("select");
+  issueTypeSelect.style.flex = "0 1 140px";
+  issueTypeSelect.style.padding = "8px 10px";
+  issueTypeSelect.style.borderRadius = "8px";
+  issueTypeSelect.style.border = "1px solid #e0d8cc";
+  const featureOption = document.createElement("option");
+  featureOption.value = "Feature";
+  featureOption.textContent = "Feature";
+  const bugOption = document.createElement("option");
+  bugOption.value = "Bug";
+  bugOption.textContent = "Bug";
+  issueTypeSelect.appendChild(featureOption);
+  issueTypeSelect.appendChild(bugOption);
+
   const projectSelect = document.createElement("select");
   projectSelect.style.flex = "1 1 200px";
   projectSelect.style.padding = "8px 10px";
@@ -719,6 +740,7 @@ function showOverlay(
     chrome.runtime.sendMessage({ type: "open-options" });
   });
 
+  jiraRow.appendChild(issueTypeSelect);
   jiraRow.appendChild(projectSelect);
   jiraRow.appendChild(summaryInput);
   const jiraStatusWrap = document.createElement("div");
@@ -805,6 +827,32 @@ function showOverlay(
   closeButton.style.cursor = "pointer";
   closeButton.addEventListener("click", () => overlay.remove());
 
+  const aiButton = document.createElement("button");
+  aiButton.textContent = "Generate with AI";
+  aiButton.style.padding = "8px 14px";
+  aiButton.style.borderRadius = "8px";
+  aiButton.style.border = "1px solid #1f1f1f";
+  aiButton.style.background = "#ffffff";
+  aiButton.style.color = "#1f1f1f";
+  aiButton.style.cursor = "pointer";
+  aiButton.addEventListener("click", async () => {
+    aiButton.disabled = true;
+    aiButton.textContent = "Generating...";
+    try {
+      const scenario = await generateScenario(meta, issueTypeSelect.value);
+      if (scenario) {
+        textarea.value = scenario;
+        header.textContent = "AI scenario ready";
+        updateCopyState();
+      } else {
+        header.textContent = "AI generation failed";
+      }
+    } finally {
+      aiButton.disabled = false;
+      aiButton.textContent = "Generate with AI";
+    }
+  });
+
   body.appendChild(jiraPanel);
   body.appendChild(keywordBar);
   body.appendChild(textarea);
@@ -837,6 +885,7 @@ function showOverlay(
 
   footerLeft.appendChild(optionsButton);
   footerLeft.appendChild(jiraButton);
+  footerLeft.appendChild(aiButton);
   footerRight.appendChild(copyButton);
   footerRight.appendChild(closeButton);
   footer.appendChild(footerLeft);
@@ -846,6 +895,8 @@ function showOverlay(
   card.appendChild(footer);
   overlay.appendChild(card);
   document.body.appendChild(overlay);
+
+  makeDraggable(header, card, overlay);
 
   void loadJiraProjects(projectSelect, jiraStatus).then((defaultKey) => {
     if (defaultKey) {
@@ -868,6 +919,11 @@ function showOverlay(
     });
     const stepDef = buildStepDefinitionStub();
 
+    if (!projectKey) {
+      jiraStatus.textContent = "Choose Jira project";
+      return;
+    }
+
     jiraStatus.textContent = "Creating ticket...";
     jiraLink.style.display = "none";
     chrome.runtime.sendMessage(
@@ -878,6 +934,7 @@ function showOverlay(
         description,
         stepDef,
         mapping: mappingBlock,
+        issueType: issueTypeSelect.value,
         snapshotDataUrl: meta.snapshotUrl,
         captureRect: meta.captureRect,
         viewport: meta.viewport,
@@ -1007,4 +1064,95 @@ async function getJiraBaseUrl(): Promise<string | null> {
   const baseUrl = config.jiraConfig?.baseUrl?.trim();
   if (!baseUrl) return null;
   return baseUrl.replace(/\/+$/, "");
+}
+
+function makeDraggable(
+  handle: HTMLElement,
+  target: HTMLElement,
+  overlay: HTMLElement
+): void {
+  let isDragging = false;
+  let offsetX = 0;
+  let offsetY = 0;
+
+  const onMouseMove = (event: MouseEvent) => {
+    if (!isDragging) return;
+    const maxLeft = window.innerWidth - target.offsetWidth;
+    const maxTop = window.innerHeight - target.offsetHeight;
+    const nextLeft = clamp(event.clientX - offsetX, 0, Math.max(0, maxLeft));
+    const nextTop = clamp(event.clientY - offsetY, 0, Math.max(0, maxTop));
+    target.style.left = `${nextLeft}px`;
+    target.style.top = `${nextTop}px`;
+  };
+
+  const onMouseUp = () => {
+    if (!isDragging) return;
+    isDragging = false;
+    overlay.style.pointerEvents = "auto";
+    document.removeEventListener("mousemove", onMouseMove);
+    document.removeEventListener("mouseup", onMouseUp);
+  };
+
+  handle.addEventListener("mousedown", (event) => {
+    event.preventDefault();
+    const rect = target.getBoundingClientRect();
+    target.style.position = "fixed";
+    target.style.left = `${rect.left}px`;
+    target.style.top = `${rect.top}px`;
+    target.style.margin = "0";
+    offsetX = event.clientX - rect.left;
+    offsetY = event.clientY - rect.top;
+    isDragging = true;
+    overlay.style.pointerEvents = "none";
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+  });
+}
+
+async function getAiServerUrl(): Promise<string> {
+  const stored = (await chrome.storage.local.get("aiConfig")) as {
+    aiConfig?: { serverUrl?: string };
+  };
+  const url = stored.aiConfig?.serverUrl?.trim();
+  return url && url.length > 0 ? url : "http://localhost:8787";
+}
+
+async function generateScenario(
+  meta: {
+    url: string;
+    title: string;
+    elementKey: string;
+    role: string | null;
+    name: string | null;
+    selectedText: string | null;
+    imageName: string | null;
+    outerHTML: string;
+    thenLine: string;
+  },
+  issueType: string
+): Promise<string | null> {
+  const serverUrl = await getAiServerUrl();
+  try {
+    const response = await fetch(`${serverUrl.replace(/\/+$/, "")}/generate-scenario`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url: meta.url,
+        title: meta.title,
+        elementKey: meta.elementKey,
+        role: meta.role,
+        name: meta.name,
+        selectedText: meta.selectedText,
+        imageName: meta.imageName,
+        outerHTML: meta.outerHTML,
+        thenLine: meta.thenLine,
+        issueType,
+      }),
+    });
+    if (!response.ok) return null;
+    const payload = await response.json();
+    return payload?.scenario || null;
+  } catch {
+    return null;
+  }
 }
