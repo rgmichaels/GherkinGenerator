@@ -24,6 +24,13 @@
 5. In extension options, set **AI Server URL** to `http://localhost:8787`.
 6. Use **Generate with AI** in the overlay to create a full Scenario.
 
+## AI Server (Docker)
+1. Set your API key in the environment: `export OPENAI_API_KEY="..."`.
+2. Optional model override: `export OPENAI_MODEL="gpt-4o-mini"`.
+3. Run: `docker compose up --build`.
+4. The service will appear as `openai-server` in Docker.
+5. In extension options, set **AI Server URL** to `http://localhost:8787`.
+
 ## Allowed Domains
 - `robjmichaels.com`
 - `hardmileoutfitters.com`
