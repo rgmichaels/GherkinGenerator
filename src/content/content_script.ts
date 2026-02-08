@@ -4,6 +4,31 @@ type SelectorCandidate = {
   reason: string;
 };
 
+type OverlayMeta = {
+  title: string;
+  elementKey: string;
+  url: string;
+  role: string | null;
+  name: string | null;
+  outerHTML: string;
+  selectors: SelectorCandidate[];
+  captureRect: { x: number; y: number; width: number; height: number } | null;
+  viewport: { width: number; height: number };
+  devicePixelRatio: number;
+  snapshotUrl: string | null;
+  selectedText: string | null;
+  imageName: string | null;
+  thenLine: string;
+  recordingDataUrl: string | null;
+  recordingId: string | null;
+  initialUi?: {
+    projectKey?: string;
+    issueType?: string;
+    summary?: string;
+    cucumber?: string;
+  };
+};
+
 type CaptureResult = {
   ok: boolean;
   error?: string;
@@ -41,8 +66,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       );
     return true;
   }
+  if (message?.type === "record:stopped") {
+    const context = message.recordingContext as { text: string; meta: OverlayMeta };
+    if (context) {
+      showOverlay(context.text, {
+        ...context.meta,
+        recordingDataUrl: message.recordingDataUrl || null,
+        recordingId: message.recordingId || null,
+      });
+    }
+    sendResponse({ ok: true });
+    return true;
+  }
   return false;
 });
+
+void initRecordingControl();
 
 async function handleCaptureAndCopy(): Promise<CaptureResult> {
   const target = pickTargetElement();
@@ -70,6 +109,8 @@ async function handleCaptureAndCopy(): Promise<CaptureResult> {
     selectedText: capture.selectedText,
     imageName: capture.imageName,
     thenLine: buildThenLine(capture),
+    recordingDataUrl: null,
+    recordingId: null,
   });
   return { ok: true, data: capture };
 }
@@ -550,25 +591,7 @@ function cssEscape(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, (match) => `\\${match}`);
 }
 
-function showOverlay(
-  text: string,
-  meta: {
-    title: string;
-    elementKey: string;
-    url: string;
-    role: string | null;
-    name: string | null;
-    outerHTML: string;
-    selectors: SelectorCandidate[];
-    captureRect: { x: number; y: number; width: number; height: number } | null;
-    viewport: { width: number; height: number };
-    devicePixelRatio: number;
-    snapshotUrl: string | null;
-    selectedText: string | null;
-    imageName: string | null;
-    thenLine: string;
-  }
-): void {
+function showOverlay(text: string, meta: OverlayMeta): void {
   const existing = document.getElementById("test-authoring-helper-overlay");
   if (existing) existing.remove();
 
@@ -684,14 +707,10 @@ function showOverlay(
   issueTypeSelect.style.padding = "8px 10px";
   issueTypeSelect.style.borderRadius = "8px";
   issueTypeSelect.style.border = "1px solid #e0d8cc";
-  const featureOption = document.createElement("option");
-  featureOption.value = "Feature";
-  featureOption.textContent = "Feature";
-  const bugOption = document.createElement("option");
-  bugOption.value = "Bug";
-  bugOption.textContent = "Bug";
-  issueTypeSelect.appendChild(featureOption);
-  issueTypeSelect.appendChild(bugOption);
+  const issueTypePlaceholder = document.createElement("option");
+  issueTypePlaceholder.value = "";
+  issueTypePlaceholder.textContent = "Issue type";
+  issueTypeSelect.appendChild(issueTypePlaceholder);
 
   const projectSelect = document.createElement("select");
   projectSelect.style.flex = "1 1 200px";
@@ -784,6 +803,12 @@ function showOverlay(
   footerRight.style.gap = "8px";
   footerRight.style.alignItems = "center";
 
+  const versionLabel = document.createElement("div");
+  versionLabel.textContent = `v${chrome.runtime.getManifest().version}`;
+  versionLabel.style.fontSize = "11px";
+  versionLabel.style.color = "#8a8175";
+  versionLabel.style.marginLeft = "6px";
+
   const originalText = text;
   const copyButton = document.createElement("button");
   copyButton.textContent = "Copy";
@@ -805,6 +830,18 @@ function showOverlay(
   };
 
   textarea.addEventListener("input", updateCopyState);
+
+  const applyInitialUi = () => {
+  if (meta.initialUi?.issueType) issueTypeSelect.value = meta.initialUi.issueType;
+    if (meta.initialUi?.projectKey) projectSelect.value = meta.initialUi.projectKey;
+    if (meta.initialUi?.summary) summaryInput.value = meta.initialUi.summary;
+    if (meta.initialUi?.cucumber) textarea.value = meta.initialUi.cucumber;
+    updateCopyState();
+  };
+
+  if (meta.initialUi) {
+    applyInitialUi();
+  }
 
   copyButton.addEventListener("click", async () => {
     if (copyButton.disabled) return;
@@ -853,6 +890,42 @@ function showOverlay(
     }
   });
 
+  const recordButton = document.createElement("button");
+  recordButton.textContent = "Record Tab";
+  recordButton.style.padding = "8px 14px";
+  recordButton.style.borderRadius = "8px";
+  recordButton.style.border = "1px solid #1f1f1f";
+  recordButton.style.background = "#ffffff";
+  recordButton.style.color = "#1f1f1f";
+  recordButton.style.cursor = "pointer";
+  recordButton.addEventListener("click", async () => {
+    recordButton.disabled = true;
+    recordButton.textContent = "Recording...";
+    const started = await startTabRecording();
+    recordButton.disabled = false;
+    recordButton.textContent = "Record Tab";
+    if (!started.ok) {
+      header.textContent = started.error
+        ? `Recording failed: ${started.error}`
+        : "Recording failed";
+      return;
+    }
+    await setRecordingState(true, {
+      text,
+      meta: {
+        ...meta,
+        initialUi: {
+          projectKey: projectSelect.value,
+          issueType: issueTypeSelect.value,
+          summary: summaryInput.value,
+          cucumber: textarea.value,
+        },
+      },
+    });
+    overlay.remove();
+    showRecordingControls();
+  });
+
   body.appendChild(jiraPanel);
   body.appendChild(keywordBar);
   body.appendChild(textarea);
@@ -883,12 +956,43 @@ function showOverlay(
     body.appendChild(previewWrap);
   }
 
+  if (meta.recordingDataUrl || meta.recordingId) {
+    const videoWrap = document.createElement("div");
+    videoWrap.style.marginTop = "10px";
+    videoWrap.style.border = "1px dashed #e0d8cc";
+    videoWrap.style.borderRadius = "8px";
+    videoWrap.style.padding = "8px";
+    videoWrap.style.background = "#faf7f2";
+
+    const videoLabel = document.createElement("div");
+    videoLabel.textContent = meta.recordingDataUrl
+      ? "Recording preview"
+      : "Recording captured (will attach to Jira)";
+    videoLabel.style.fontSize = "12px";
+    videoLabel.style.color = "#4b4b4b";
+    videoLabel.style.marginBottom = "6px";
+
+    videoWrap.appendChild(videoLabel);
+    if (meta.recordingDataUrl) {
+      const video = document.createElement("video");
+      video.src = meta.recordingDataUrl;
+      video.controls = true;
+      video.style.maxWidth = "100%";
+      video.style.borderRadius = "6px";
+      video.style.border = "1px solid #e0d8cc";
+      videoWrap.appendChild(video);
+    }
+    body.appendChild(videoWrap);
+  }
+
   footerLeft.appendChild(optionsButton);
   footerLeft.appendChild(jiraButton);
   footerLeft.appendChild(aiButton);
+  footerLeft.appendChild(recordButton);
   footerRight.appendChild(copyButton);
   footerRight.appendChild(closeButton);
   footer.appendChild(footerLeft);
+  footer.appendChild(versionLabel);
   footer.appendChild(footerRight);
   card.appendChild(header);
   card.appendChild(body);
@@ -899,9 +1003,27 @@ function showOverlay(
   makeDraggable(header, card, overlay);
 
   void loadJiraProjects(projectSelect, jiraStatus).then((defaultKey) => {
+    if (meta.initialUi?.projectKey) {
+      projectSelect.value = meta.initialUi.projectKey;
+      void loadIssueTypes(issueTypeSelect, jiraStatus, meta.initialUi.projectKey).then(
+        () => applyInitialUi()
+      );
+      return;
+    }
     if (defaultKey) {
       projectSelect.value = defaultKey;
     }
+    if (projectSelect.value) {
+      void loadIssueTypes(issueTypeSelect, jiraStatus, projectSelect.value).then(
+        () => applyInitialUi()
+      );
+    }
+    applyInitialUi();
+  });
+
+  projectSelect.addEventListener("change", () => {
+    if (!projectSelect.value) return;
+    void loadIssueTypes(issueTypeSelect, jiraStatus, projectSelect.value);
   });
 
   jiraButton.addEventListener("click", () => {
@@ -936,6 +1058,8 @@ function showOverlay(
         mapping: mappingBlock,
         issueType: issueTypeSelect.value,
         snapshotDataUrl: meta.snapshotUrl,
+        recordingDataUrl: meta.recordingDataUrl,
+        recordingId: meta.recordingId,
         captureRect: meta.captureRect,
         viewport: meta.viewport,
         devicePixelRatio: meta.devicePixelRatio,
@@ -970,6 +1094,127 @@ function insertAtCursor(textarea: HTMLTextAreaElement, insertText: string): void
   const cursor = start + insertText.length;
   textarea.selectionStart = cursor;
   textarea.selectionEnd = cursor;
+}
+
+async function startTabRecording(): Promise<{ ok: boolean; error?: string }> {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({ type: "record:request-start" }, (response) => {
+      if (chrome.runtime.lastError) {
+        resolve({ ok: false, error: chrome.runtime.lastError.message });
+        return;
+      }
+      resolve({ ok: Boolean(response?.ok), error: response?.error });
+    });
+  });
+}
+
+function showRecordingControls(): void {
+  const existing = document.getElementById("gherkin-recording-control");
+  if (existing) existing.remove();
+
+  const control = document.createElement("div");
+  control.id = "gherkin-recording-control";
+  control.style.position = "fixed";
+  control.style.bottom = "16px";
+  control.style.right = "16px";
+  control.style.zIndex = "2147483647";
+  control.style.background = "#1f1f1f";
+  control.style.color = "#ffffff";
+  control.style.padding = "10px 12px";
+  control.style.borderRadius = "10px";
+  control.style.boxShadow = "0 8px 20px rgba(0,0,0,0.35)";
+  control.style.display = "flex";
+  control.style.alignItems = "center";
+  control.style.gap = "10px";
+  control.style.fontFamily = "system-ui, -apple-system, sans-serif";
+
+  const dot = document.createElement("div");
+  dot.style.width = "10px";
+  dot.style.height = "10px";
+  dot.style.borderRadius = "999px";
+  dot.style.background = "#ff5f56";
+
+  const label = document.createElement("div");
+  label.textContent = "Recording tab…";
+
+  const stopButton = document.createElement("button");
+  stopButton.textContent = "Stop";
+  stopButton.style.padding = "6px 10px";
+  stopButton.style.borderRadius = "8px";
+  stopButton.style.border = "1px solid #ffffff";
+  stopButton.style.background = "transparent";
+  stopButton.style.color = "#ffffff";
+  stopButton.style.cursor = "pointer";
+
+  stopButton.addEventListener("click", () => {
+    stopButton.disabled = true;
+    stopButton.textContent = "Stopping...";
+    chrome.runtime.sendMessage({ type: "record:request-stop" }, (response) => {
+      control.remove();
+      if (chrome.runtime.lastError) {
+        void setRecordingState(false, null);
+        void restoreOverlayFromRecording(null, null);
+        return;
+      }
+      const dataUrl = response?.dataUrl || null;
+      const recordingId = response?.recordingId || null;
+      void setRecordingState(false, null);
+      void restoreOverlayFromRecording(dataUrl, recordingId);
+    });
+  });
+
+  control.appendChild(dot);
+  control.appendChild(label);
+  control.appendChild(stopButton);
+  document.body.appendChild(control);
+}
+
+async function setRecordingState(
+  active: boolean,
+  context: { text: string; meta: OverlayMeta } | null
+): Promise<void> {
+  await new Promise((resolve) => {
+    chrome.runtime.sendMessage(
+      {
+        type: "record:state-set",
+        recordingActive: active,
+        recordingContext: context ?? null,
+      },
+      () => resolve(null)
+    );
+  });
+}
+
+async function restoreOverlayFromRecording(
+  recordingDataUrl: string | null,
+  recordingId: string | null
+): Promise<void> {
+  const stored = await new Promise<{
+    recordingContext?: { text: string; meta: OverlayMeta } | null;
+  }>((resolve) => {
+    chrome.runtime.sendMessage({ type: "record:state-get" }, (response) => {
+      resolve(response || {});
+    });
+  });
+  const context = stored.recordingContext;
+  if (!context) return;
+  showOverlay(context.text, {
+    ...context.meta,
+    recordingDataUrl,
+    recordingId,
+  });
+  await setRecordingState(false, null);
+}
+
+async function initRecordingControl(): Promise<void> {
+  const stored = await new Promise<{ recordingActive?: boolean }>((resolve) => {
+    chrome.runtime.sendMessage({ type: "record:state-get" }, (response) => {
+      resolve(response || {});
+    });
+  });
+  if (stored.recordingActive) {
+    showRecordingControls();
+  }
 }
 
 async function loadJiraProjects(
@@ -1155,4 +1400,50 @@ async function generateScenario(
   } catch {
     return null;
   }
+}
+
+async function loadIssueTypes(
+  select: HTMLSelectElement,
+  status: HTMLElement,
+  projectKey: string
+): Promise<void> {
+  select.innerHTML = "";
+  const loading = document.createElement("option");
+  loading.textContent = "Loading types...";
+  loading.value = "";
+  select.appendChild(loading);
+
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage(
+      { type: "jira:list-issuetypes", projectKey },
+      (response) => {
+        if (chrome.runtime.lastError || !response?.ok) {
+          status.textContent =
+            response?.error || chrome.runtime.lastError?.message || "";
+          select.innerHTML = "";
+          const option = document.createElement("option");
+          option.value = "";
+          option.textContent = "Issue type";
+          select.appendChild(option);
+          resolve();
+          return;
+        }
+
+        select.innerHTML = "";
+        const option = document.createElement("option");
+        option.value = "";
+        option.textContent = "Issue type";
+        select.appendChild(option);
+
+        const issueTypes = response.issueTypes as { name: string; id: string }[];
+        issueTypes.forEach((it) => {
+          const item = document.createElement("option");
+          item.value = it.name;
+          item.textContent = it.name;
+          select.appendChild(item);
+        });
+        resolve();
+      }
+    );
+  });
 }
