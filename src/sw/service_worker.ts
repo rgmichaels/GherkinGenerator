@@ -7,6 +7,12 @@ type JiraConfig = {
   mapping: Record<string, string>;
 };
 
+let recordingState: {
+  recordingActive?: boolean;
+  recordingContext?: { text: string; meta: unknown } | null;
+  tabId?: number | null;
+} = {};
+
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({
@@ -37,6 +43,9 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.target === "offscreen") {
+    return false;
+  }
   if (message?.type === "ping") {
     sendResponse({ ok: true });
     return true;
@@ -58,6 +67,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === "jira:list-issuetypes") {
+    void handleJiraListIssueTypes(message).then(sendResponse);
+    return true;
+  }
+
   if (message?.type === "jira:create-issue") {
     void handleJiraCreateIssue(message, sender.tab?.id, sender.tab?.windowId).then(
       sendResponse
@@ -70,7 +84,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message?.type === "record:start") {
+  if (message?.type === "record:request-start") {
     if (!sender.tab?.id) {
       sendResponse({ ok: false, error: "Missing tab context." });
       return true;
@@ -79,12 +93,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message?.type === "record:stop") {
+  if (message?.type === "record:request-stop") {
     if (!sender.tab?.id) {
       sendResponse({ ok: false, error: "Missing tab context." });
       return true;
     }
     void handleRecordStop().then(sendResponse);
+    return true;
+  }
+
+  if (message?.type === "record:state-set") {
+    void handleRecordStateSet(message, sender.tab?.id).then(sendResponse);
+    return true;
+  }
+
+  if (message?.type === "record:state-get") {
+    void handleRecordStateGet().then(sendResponse);
     return true;
   }
 
@@ -158,6 +182,44 @@ async function handleJiraListProjects() {
   return { ok: true, projects };
 }
 
+async function handleJiraListIssueTypes(message: { projectKey?: string }) {
+  const config = await getJiraConfig();
+  if (!config?.baseUrl || !config?.email || !config?.token) {
+    return { ok: false, error: "Missing Jira configuration." };
+  }
+  if (!message.projectKey) {
+    return { ok: false, error: "Missing project key." };
+  }
+
+  const baseUrl = normalizeBaseUrl(config.baseUrl);
+  const response = await fetch(
+    `${baseUrl}/rest/api/3/issue/createmeta?projectKeys=${encodeURIComponent(
+      message.projectKey
+    )}&expand=projects.issuetypes`,
+    {
+      headers: {
+        Authorization: buildAuthHeader(config.email, config.token),
+        Accept: "application/json",
+      },
+    }
+  );
+
+  if (!response.ok) {
+    const detail = await safeReadError(response);
+    return { ok: false, error: `Jira error (${response.status}): ${detail}` };
+  }
+
+  const payload = await response.json();
+  const projects = Array.isArray(payload.projects) ? payload.projects : [];
+  const issueTypes =
+    projects[0]?.issuetypes?.map((it: { name: string; id: string }) => ({
+      name: it.name,
+      id: it.id,
+    })) || [];
+
+  return { ok: true, issueTypes };
+}
+
 async function handleJiraCreateIssue(
   message: {
     projectKey?: string;
@@ -168,6 +230,7 @@ async function handleJiraCreateIssue(
     issueType?: string;
     snapshotDataUrl?: string | null;
     recordingDataUrl?: string | null;
+    recordingId?: string | null;
     captureRect?: { x: number; y: number; width: number; height: number } | null;
     viewport?: { width: number; height: number };
     devicePixelRatio?: number;
@@ -205,7 +268,7 @@ async function handleJiraCreateIssue(
   };
 
   const issueType =
-    message.issueType?.toLowerCase() === "bug" ? "Bug" : "Story";
+    message.issueType?.toLowerCase() === "bug" ? "Bug" : "Task";
 
   const response = await fetch(`${baseUrl}/rest/api/3/issue`, {
     method: "POST",
@@ -225,7 +288,8 @@ async function handleJiraCreateIssue(
   });
 
   if (!response.ok) {
-    return { ok: false, error: `Jira error (${response.status})` };
+    const detail = await safeReadError(response);
+    return { ok: false, error: `Jira error (${response.status}): ${detail}` };
   }
 
   const payload = await response.json();
@@ -257,6 +321,15 @@ async function handleJiraCreateIssue(
     const response = await fetch(message.recordingDataUrl);
     const blob = await response.blob();
     await uploadAttachment(baseUrl, config, issueKey, blob);
+  } else if (message.recordingId) {
+    await sendToOffscreen({
+      type: "record:upload",
+      target: "offscreen",
+      recordingId: message.recordingId,
+      baseUrl,
+      authHeader: buildAuthHeader(config.email, config.token),
+      issueKey,
+    });
   }
 
   const comments: string[] = [];
@@ -264,7 +337,9 @@ async function handleJiraCreateIssue(
   if (message.mapping?.trim()) comments.push(message.mapping.trim());
 
   for (const comment of comments) {
-    await fetch(`${baseUrl}/rest/api/3/issue/${issueKey}/comment`, {
+    const commentResponse = await fetch(
+      `${baseUrl}/rest/api/3/issue/${issueKey}/comment`,
+      {
       method: "POST",
       headers: {
         Authorization: buildAuthHeader(config.email, config.token),
@@ -284,7 +359,15 @@ async function handleJiraCreateIssue(
           ],
         },
       }),
-    });
+      }
+    );
+    if (!commentResponse.ok) {
+      const detail = await safeReadError(commentResponse);
+      return {
+        ok: false,
+        error: `Jira comment error (${commentResponse.status}): ${detail}`,
+      };
+    }
   }
 
   return { ok: true, key: issueKey };
@@ -295,25 +378,47 @@ async function ensureOffscreen() {
   if (hasDocument) return;
   await chrome.offscreen.createDocument({
     url: "offscreen/offscreen.html",
-    reasons: ["DISPLAY_MEDIA"],
-    justification: "Record the active tab for bug/feature capture.",
+    reasons: ["USER_MEDIA"],
+    justification: "Record the active tab using getUserMedia.",
   });
 }
 
 async function handleRecordStart(tabId?: number) {
   if (!tabId) return { ok: false, error: "Missing tab id." };
   await ensureOffscreen();
-  const streamId = await chrome.tabCapture.getMediaStreamId({
-    targetTabId: tabId,
-  });
+  let streamId: string | undefined;
+  try {
+    streamId = await chrome.tabCapture.getMediaStreamId({
+      targetTabId: tabId,
+    });
+  } catch (error) {
+    return { ok: false, error: error?.message || "Failed to get stream id." };
+  }
+  if (chrome.runtime.lastError) {
+    return { ok: false, error: chrome.runtime.lastError.message };
+  }
   if (!streamId) return { ok: false, error: "Failed to get stream id." };
 
-  return sendToOffscreen({ type: "record:start", streamId });
+  return sendToOffscreen({ type: "record:start", streamId, target: "offscreen" });
 }
 
 async function handleRecordStop() {
   await ensureOffscreen();
-  return sendToOffscreen({ type: "record:stop" });
+  const response = await sendToOffscreen({ type: "record:stop", target: "offscreen" });
+  if (recordingState.recordingContext && typeof recordingState.tabId === "number") {
+    const payload = {
+      type: "record:stopped",
+      recordingContext: recordingState.recordingContext,
+      recordingId: response?.recordingId || null,
+      recordingDataUrl: response?.dataUrl || null,
+    };
+    try {
+      await chrome.tabs.sendMessage(recordingState.tabId, payload);
+    } catch {
+      // No-op; content script may not be ready on the new page yet.
+    }
+  }
+  return response;
 }
 
 async function sendToOffscreen(message: unknown) {
@@ -326,6 +431,42 @@ async function sendToOffscreen(message: unknown) {
       resolve(response);
     });
   });
+}
+
+async function handleRecordStateSet(message: {
+  recordingActive?: boolean;
+  recordingContext?: { text: string; meta: unknown } | null;
+}, tabId?: number) {
+  const payload: Record<string, unknown> = {};
+  if (typeof message.recordingActive === "boolean") {
+    payload.recordingActive = message.recordingActive;
+  }
+  if (message.recordingContext !== undefined) {
+    payload.recordingContext = message.recordingContext;
+  }
+  if (typeof tabId === "number") {
+    payload.tabId = tabId;
+  }
+  recordingState = { ...recordingState, ...payload };
+  try {
+    await chrome.storage.session.set(payload);
+  } catch {
+    // Fallback to in-memory recordingState.
+  }
+  return { ok: true };
+}
+
+async function handleRecordStateGet() {
+  try {
+    const stored = (await chrome.storage.session.get([
+      "recordingActive",
+      "recordingContext",
+      "tabId",
+    ])) as { recordingActive?: boolean; recordingContext?: unknown | null };
+    return { ok: true, ...recordingState, ...stored };
+  } catch {
+    return { ok: true, ...recordingState };
+  }
 }
 
 async function captureAndCropTab(
@@ -384,7 +525,9 @@ async function uploadAttachment(
   const form = new FormData();
   form.append("file", blob, "selection.png");
 
-  await fetch(`${baseUrl}/rest/api/3/issue/${issueKey}/attachments`, {
+  const response = await fetch(
+    `${baseUrl}/rest/api/3/issue/${issueKey}/attachments`,
+    {
     method: "POST",
     headers: {
       Authorization: buildAuthHeader(config.email, config.token),
@@ -392,7 +535,12 @@ async function uploadAttachment(
       "X-Atlassian-Token": "no-check",
     },
     body: form,
-  });
+    }
+  );
+  if (!response.ok) {
+    const detail = await safeReadError(response);
+    throw new Error(`Jira attachment error (${response.status}): ${detail}`);
+  }
 }
 
 async function handleSnapshotPreview(
@@ -437,6 +585,21 @@ async function handleSnapshotPreview(
   const previewBlob = await canvas.convertToBlob({ type: "image/png" });
   const previewDataUrl = await blobToDataUrl(previewBlob);
   return { ok: true, dataUrl: previewDataUrl };
+}
+
+async function safeReadError(response: Response): Promise<string> {
+  try {
+    const text = await response.text();
+    if (!text) return "No details";
+    try {
+      const json = JSON.parse(text);
+      return json?.errorMessages?.join("; ") || json?.message || text;
+    } catch {
+      return text;
+    }
+  } catch {
+    return "No details";
+  }
 }
 
 async function blobToDataUrl(blob: Blob): Promise<string> {

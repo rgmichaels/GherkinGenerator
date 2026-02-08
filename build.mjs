@@ -10,11 +10,25 @@ const DIST = path.join(ROOT, "dist");
 
 const ensureDir = (p) => fs.mkdirSync(p, { recursive: true });
 
-const writeManifest = () => {
+const bumpPatch = (version) => {
+  const parts = version.split(".").map((part) => parseInt(part, 10));
+  while (parts.length < 3) parts.push(0);
+  parts[2] = Number.isFinite(parts[2]) ? parts[2] + 1 : 1;
+  return parts.join(".");
+};
+
+const writeManifest = (shouldBump) => {
   const manifestPath = path.join(SRC, "manifest.json");
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
+  if (shouldBump) {
+    manifest.version = bumpPatch(manifest.version || "0.0.0");
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+  }
   ensureDir(DIST);
-  fs.writeFileSync(path.join(DIST, "manifest.json"), JSON.stringify(manifest, null, 2));
+  fs.writeFileSync(
+    path.join(DIST, "manifest.json"),
+    JSON.stringify(manifest, null, 2)
+  );
 };
 
 const copyStatic = () => {
@@ -51,7 +65,7 @@ const build = async () => {
     sourcemap: true
   });
 
-  writeManifest();
+  writeManifest(true);
   copyStatic();
 };
 
@@ -72,7 +86,7 @@ if (isWatch) {
   });
 
   await ctx.watch();
-  writeManifest();
+  writeManifest(false);
   copyStatic();
 } else {
   await build();

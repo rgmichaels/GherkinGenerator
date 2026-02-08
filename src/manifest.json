@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Test Authoring Helper (Gherkin)",
-  "version": "0.0.1",
+  "version": "0.0.3",
   "description": "Right-click elements to generate Gherkin + mapping for Playwright-Cucumber.",
   "permissions": [
     "contextMenus",
@@ -42,7 +42,9 @@
         "http://localhost:3000/*",
         "http://127.0.0.1:3000/*"
       ],
-      "js": ["content/content_script.js"],
+      "js": [
+        "content/content_script.js"
+      ],
       "run_at": "document_idle"
     }
   ],
