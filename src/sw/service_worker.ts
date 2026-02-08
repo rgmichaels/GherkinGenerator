@@ -70,6 +70,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === "record:start") {
+    if (!sender.tab?.id) {
+      sendResponse({ ok: false, error: "Missing tab context." });
+      return true;
+    }
+    void handleRecordStart(sender.tab.id).then(sendResponse);
+    return true;
+  }
+
+  if (message?.type === "record:stop") {
+    if (!sender.tab?.id) {
+      sendResponse({ ok: false, error: "Missing tab context." });
+      return true;
+    }
+    void handleRecordStop().then(sendResponse);
+    return true;
+  }
+
   return false;
 });
 
@@ -149,6 +167,7 @@ async function handleJiraCreateIssue(
     mapping?: string;
     issueType?: string;
     snapshotDataUrl?: string | null;
+    recordingDataUrl?: string | null;
     captureRect?: { x: number; y: number; width: number; height: number } | null;
     viewport?: { width: number; height: number };
     devicePixelRatio?: number;
@@ -234,6 +253,12 @@ async function handleJiraCreateIssue(
     }
   }
 
+  if (message.recordingDataUrl) {
+    const response = await fetch(message.recordingDataUrl);
+    const blob = await response.blob();
+    await uploadAttachment(baseUrl, config, issueKey, blob);
+  }
+
   const comments: string[] = [];
   if (message.stepDef?.trim()) comments.push(message.stepDef.trim());
   if (message.mapping?.trim()) comments.push(message.mapping.trim());
@@ -263,6 +288,44 @@ async function handleJiraCreateIssue(
   }
 
   return { ok: true, key: issueKey };
+}
+
+async function ensureOffscreen() {
+  const hasDocument = await chrome.offscreen.hasDocument();
+  if (hasDocument) return;
+  await chrome.offscreen.createDocument({
+    url: "offscreen/offscreen.html",
+    reasons: ["DISPLAY_MEDIA"],
+    justification: "Record the active tab for bug/feature capture.",
+  });
+}
+
+async function handleRecordStart(tabId?: number) {
+  if (!tabId) return { ok: false, error: "Missing tab id." };
+  await ensureOffscreen();
+  const streamId = await chrome.tabCapture.getMediaStreamId({
+    targetTabId: tabId,
+  });
+  if (!streamId) return { ok: false, error: "Failed to get stream id." };
+
+  return sendToOffscreen({ type: "record:start", streamId });
+}
+
+async function handleRecordStop() {
+  await ensureOffscreen();
+  return sendToOffscreen({ type: "record:stop" });
+}
+
+async function sendToOffscreen(message: unknown) {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage(message, (response) => {
+      if (chrome.runtime.lastError) {
+        resolve({ ok: false, error: chrome.runtime.lastError.message });
+        return;
+      }
+      resolve(response);
+    });
+  });
 }
 
 async function captureAndCropTab(

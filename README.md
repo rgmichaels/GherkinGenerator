@@ -31,6 +31,12 @@
 4. The service will appear as `openai-server` in Docker.
 5. In extension options, set **AI Server URL** to `http://localhost:8787`.
 
+## Tab Recording (Preview)
+1. In the overlay, click **Record Tab**.
+2. The overlay hides and a small **Recording** control appears.
+3. Click **Stop** to return to the overlay with a recording preview.
+4. When creating the Jira ticket, the recording is attached automatically.
+
 ## Allowed Domains
 - `robjmichaels.com`
 - `hardmileoutfitters.com`

@@ -70,6 +70,7 @@ async function handleCaptureAndCopy(): Promise<CaptureResult> {
     selectedText: capture.selectedText,
     imageName: capture.imageName,
     thenLine: buildThenLine(capture),
+    recordingDataUrl: null,
   });
   return { ok: true, data: capture };
 }
@@ -567,6 +568,7 @@ function showOverlay(
     selectedText: string | null;
     imageName: string | null;
     thenLine: string;
+    recordingDataUrl: string | null;
   }
 ): void {
   const existing = document.getElementById("test-authoring-helper-overlay");
@@ -853,6 +855,31 @@ function showOverlay(
     }
   });
 
+  const recordButton = document.createElement("button");
+  recordButton.textContent = "Record Tab";
+  recordButton.style.padding = "8px 14px";
+  recordButton.style.borderRadius = "8px";
+  recordButton.style.border = "1px solid #1f1f1f";
+  recordButton.style.background = "#ffffff";
+  recordButton.style.color = "#1f1f1f";
+  recordButton.style.cursor = "pointer";
+  recordButton.addEventListener("click", async () => {
+    recordButton.disabled = true;
+    recordButton.textContent = "Recording...";
+    const started = await startTabRecording();
+    recordButton.disabled = false;
+    recordButton.textContent = "Record Tab";
+    if (!started) {
+      header.textContent = "Recording failed";
+      return;
+    }
+
+    overlay.remove();
+    showRecordingControls(async (recordingDataUrl) => {
+      showOverlay(text, { ...meta, recordingDataUrl });
+    });
+  });
+
   body.appendChild(jiraPanel);
   body.appendChild(keywordBar);
   body.appendChild(textarea);
@@ -883,9 +910,36 @@ function showOverlay(
     body.appendChild(previewWrap);
   }
 
+  if (meta.recordingDataUrl) {
+    const videoWrap = document.createElement("div");
+    videoWrap.style.marginTop = "10px";
+    videoWrap.style.border = "1px dashed #e0d8cc";
+    videoWrap.style.borderRadius = "8px";
+    videoWrap.style.padding = "8px";
+    videoWrap.style.background = "#faf7f2";
+
+    const videoLabel = document.createElement("div");
+    videoLabel.textContent = "Recording preview";
+    videoLabel.style.fontSize = "12px";
+    videoLabel.style.color = "#4b4b4b";
+    videoLabel.style.marginBottom = "6px";
+
+    const video = document.createElement("video");
+    video.src = meta.recordingDataUrl;
+    video.controls = true;
+    video.style.maxWidth = "100%";
+    video.style.borderRadius = "6px";
+    video.style.border = "1px solid #e0d8cc";
+
+    videoWrap.appendChild(videoLabel);
+    videoWrap.appendChild(video);
+    body.appendChild(videoWrap);
+  }
+
   footerLeft.appendChild(optionsButton);
   footerLeft.appendChild(jiraButton);
   footerLeft.appendChild(aiButton);
+  footerLeft.appendChild(recordButton);
   footerRight.appendChild(copyButton);
   footerRight.appendChild(closeButton);
   footer.appendChild(footerLeft);
@@ -936,6 +990,7 @@ function showOverlay(
         mapping: mappingBlock,
         issueType: issueTypeSelect.value,
         snapshotDataUrl: meta.snapshotUrl,
+        recordingDataUrl: meta.recordingDataUrl,
         captureRect: meta.captureRect,
         viewport: meta.viewport,
         devicePixelRatio: meta.devicePixelRatio,
@@ -970,6 +1025,75 @@ function insertAtCursor(textarea: HTMLTextAreaElement, insertText: string): void
   const cursor = start + insertText.length;
   textarea.selectionStart = cursor;
   textarea.selectionEnd = cursor;
+}
+
+async function startTabRecording(): Promise<boolean> {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({ type: "record:start" }, (response) => {
+      if (chrome.runtime.lastError) {
+        resolve(false);
+        return;
+      }
+      resolve(Boolean(response?.ok));
+    });
+  });
+}
+
+function showRecordingControls(onStopped: (dataUrl: string | null) => void): void {
+  const existing = document.getElementById("gherkin-recording-control");
+  if (existing) existing.remove();
+
+  const control = document.createElement("div");
+  control.id = "gherkin-recording-control";
+  control.style.position = "fixed";
+  control.style.bottom = "16px";
+  control.style.right = "16px";
+  control.style.zIndex = "2147483647";
+  control.style.background = "#1f1f1f";
+  control.style.color = "#ffffff";
+  control.style.padding = "10px 12px";
+  control.style.borderRadius = "10px";
+  control.style.boxShadow = "0 8px 20px rgba(0,0,0,0.35)";
+  control.style.display = "flex";
+  control.style.alignItems = "center";
+  control.style.gap = "10px";
+  control.style.fontFamily = "system-ui, -apple-system, sans-serif";
+
+  const dot = document.createElement("div");
+  dot.style.width = "10px";
+  dot.style.height = "10px";
+  dot.style.borderRadius = "999px";
+  dot.style.background = "#ff5f56";
+
+  const label = document.createElement("div");
+  label.textContent = "Recording tab…";
+
+  const stopButton = document.createElement("button");
+  stopButton.textContent = "Stop";
+  stopButton.style.padding = "6px 10px";
+  stopButton.style.borderRadius = "8px";
+  stopButton.style.border = "1px solid #ffffff";
+  stopButton.style.background = "transparent";
+  stopButton.style.color = "#ffffff";
+  stopButton.style.cursor = "pointer";
+
+  stopButton.addEventListener("click", () => {
+    stopButton.disabled = true;
+    stopButton.textContent = "Stopping...";
+    chrome.runtime.sendMessage({ type: "record:stop" }, (response) => {
+      control.remove();
+      if (chrome.runtime.lastError) {
+        onStopped(null);
+        return;
+      }
+      onStopped(response?.dataUrl || null);
+    });
+  });
+
+  control.appendChild(dot);
+  control.appendChild(label);
+  control.appendChild(stopButton);
+  document.body.appendChild(control);
 }
 
 async function loadJiraProjects(

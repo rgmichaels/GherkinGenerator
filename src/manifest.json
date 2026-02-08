@@ -3,7 +3,15 @@
   "name": "Test Authoring Helper (Gherkin)",
   "version": "0.0.1",
   "description": "Right-click elements to generate Gherkin + mapping for Playwright-Cucumber.",
-  "permissions": ["contextMenus", "activeTab", "scripting", "storage", "tabs"],
+  "permissions": [
+    "contextMenus",
+    "activeTab",
+    "scripting",
+    "storage",
+    "tabs",
+    "tabCapture",
+    "offscreen"
+  ],
   "host_permissions": [
     "https://*.robjmichaels.com/*",
     "https://robjmichaels.com/*",

@@ -24,6 +24,13 @@ const copyStatic = () => {
     path.join(SRC, "options", "options.html"),
     path.join(optionsDir, "options.html")
   );
+
+  const offscreenDir = path.join(DIST, "offscreen");
+  ensureDir(offscreenDir);
+  fs.copyFileSync(
+    path.join(SRC, "offscreen", "offscreen.html"),
+    path.join(offscreenDir, "offscreen.html")
+  );
 };
 
 const build = async () => {
@@ -33,7 +40,8 @@ const build = async () => {
     entryPoints: {
       "sw/service_worker": path.join(SRC, "sw", "service_worker.ts"),
       "content/content_script": path.join(SRC, "content", "content_script.ts"),
-      "options/options": path.join(SRC, "options", "options.ts")
+      "options/options": path.join(SRC, "options", "options.ts"),
+      "offscreen/offscreen": path.join(SRC, "offscreen", "offscreen.ts")
     },
     bundle: true,
     outdir: DIST,
@@ -52,7 +60,8 @@ if (isWatch) {
     entryPoints: {
       "sw/service_worker": path.join(SRC, "sw", "service_worker.ts"),
       "content/content_script": path.join(SRC, "content", "content_script.ts"),
-      "options/options": path.join(SRC, "options", "options.ts")
+      "options/options": path.join(SRC, "options", "options.ts"),
+      "offscreen/offscreen": path.join(SRC, "offscreen", "offscreen.ts")
     },
     bundle: true,
     outdir: DIST,
